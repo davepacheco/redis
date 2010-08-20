@@ -543,7 +543,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     /* Close connections of timedout clients */
-    if ((server.maxidletime && !(loops % 100)) || server.blpop_blocked_clients)
+    if ((server.maxidletime && !(loops % 10)) || server.blpop_blocked_clients)
         closeTimedoutClients();
 
     /* Check if a background saving or AOF rewrite in progress terminated */
