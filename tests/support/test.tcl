@@ -47,6 +47,20 @@ proc assert_type {type key} {
     assert_equal $type [r type $key]
 }
 
+# Helper function that retries to execute a block of code to run without
+# errors for up to 500ms, because certain events may be time dependent.
+proc eventually {code} {
+    set start 0
+    while {[catch {uplevel 1 $code} error]} {
+        after 10
+        incr start 10
+        if {$start >= 500} {
+            uplevel 1 $code
+            return
+        }
+    }
+}
+
 proc test {name code {okpattern notspecified}} {
     # abort if tagged with a tag to deny
     foreach tag $::denytags {

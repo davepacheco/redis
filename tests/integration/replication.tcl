@@ -72,7 +72,7 @@ start_server {tags {"repl"}} {
         
         test {SET on the master should immediately propagate} {
             r -1 set mykey bar
-            r  0 get mykey
-        } {bar}
+            eventually { assert_equal bar [r 0 get mykey] }
+        }
     }
 }
