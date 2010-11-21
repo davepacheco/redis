@@ -3391,36 +3391,40 @@ static int getLongFromObjectOrReply(redisClient *c, robj *o, long *target, const
 
 static int rdbSaveType(FILE *fp, unsigned char type) {
     if (fwrite(&type,1,1,fp) == 0) return -1;
-    return 0;
+    return 1; /* bytes written */
 }
 
 static int rdbSaveTime(FILE *fp, time_t t) {
     int32_t t32 = (int32_t) t;
     if (fwrite(&t32,4,1,fp) == 0) return -1;
-    return 0;
+    return 4; /* bytes written */
 }
 
 /* check rdbLoadLen() comments for more info */
 static int rdbSaveLen(FILE *fp, uint32_t len) {
     unsigned char buf[2];
+    int nwritten;
 
     if (len < (1<<6)) {
         /* Save a 6 bit len */
         buf[0] = (len&0xFF)|(REDIS_RDB_6BITLEN<<6);
         if (fwrite(buf,1,1,fp) == 0) return -1;
+        nwritten = 1;
     } else if (len < (1<<14)) {
         /* Save a 14 bit len */
         buf[0] = ((len>>8)&0xFF)|(REDIS_RDB_14BITLEN<<6);
         buf[1] = len&0xFF;
         if (fwrite(buf,2,1,fp) == 0) return -1;
+        nwritten = 2;
     } else {
         /* Save a 32 bit len */
         buf[0] = (REDIS_RDB_32BITLEN<<6);
         if (fwrite(buf,1,1,fp) == 0) return -1;
         len = htonl(len);
         if (fwrite(&len,4,1,fp) == 0) return -1;
+        nwritten = 1+4;
     }
-    return 0;
+    return nwritten;
 }
 
 /* Encode 'value' as an integer if possible (if integer will fit the
@@ -3473,6 +3477,7 @@ static int rdbTryIntegerEncoding(char *s, size_t len, unsigned char *enc) {
 static int rdbSaveLzfStringObject(FILE *fp, unsigned char *s, size_t len) {
     size_t comprlen, outlen;
     unsigned char byte;
+    int n, nwritten = 0;
     void *out;
 
     /* We require at least four bytes compression for this to be worth it */
@@ -3487,11 +3492,19 @@ static int rdbSaveLzfStringObject(FILE *fp, unsigned char *s, size_t len) {
     /* Data compressed! Let's save it on disk */
     byte = (REDIS_RDB_ENCVAL<<6)|REDIS_RDB_ENC_LZF;
     if (fwrite(&byte,1,1,fp) == 0) goto writeerr;
-    if (rdbSaveLen(fp,comprlen) == -1) goto writeerr;
-    if (rdbSaveLen(fp,len) == -1) goto writeerr;
+    nwritten += 1;
+
+    if ((n = rdbSaveLen(fp,comprlen)) == -1) goto writeerr;
+    nwritten += n;
+
+    if ((n = rdbSaveLen(fp,len)) == -1) goto writeerr;
+    nwritten += n;
+
     if (fwrite(out,comprlen,1,fp) == 0) goto writeerr;
+    nwritten += comprlen;
+
     zfree(out);
-    return comprlen;
+    return nwritten;
 
 writeerr:
     zfree(out);
@@ -3502,31 +3515,34 @@ writeerr:
  * representation of an integer value we try to safe it in a special form */
 static int rdbSaveRawString(FILE *fp, unsigned char *s, size_t len) {
     int enclen;
+    int n, nwritten = 0;
 
     /* Try integer encoding */
     if (len <= 11) {
         unsigned char buf[5];
         if ((enclen = rdbTryIntegerEncoding((char*)s,len,buf)) > 0) {
             if (fwrite(buf,enclen,1,fp) == 0) return -1;
-            return 0;
+            return enclen;
         }
     }
 
     /* Try LZF compression - under 20 bytes it's unable to compress even
      * aaaaaaaaaaaaaaaaaa so skip it */
     if (server.rdbcompression && len > 20) {
-        int retval;
-
-        retval = rdbSaveLzfStringObject(fp,s,len);
-        if (retval == -1) return -1;
-        if (retval > 0) return 0;
-        /* retval == 0 means data can't be compressed, save the old way */
+        n = rdbSaveLzfStringObject(fp,s,len);
+        if (n == -1) return -1;
+        if (n > 0) return n;
+        /* Return value of 0 means data can't be compressed, save the old way */
     }
 
     /* Store verbatim */
-    if (rdbSaveLen(fp,len) == -1) return -1;
-    if (len && fwrite(s,len,1,fp) == 0) return -1;
-    return 0;
+    if ((n = rdbSaveLen(fp,len)) == -1) return -1;
+    nwritten += n;
+    if (len > 0) {
+        if (fwrite(s,len,1,fp) == 0) return -1;
+        nwritten += len;
+    }
+    return nwritten;
 }
 
 /* Like rdbSaveStringObjectRaw() but handle encoded objects */
@@ -3542,7 +3558,7 @@ static int rdbSaveStringObject(FILE *fp, robj *obj) {
 
         if ((enclen = rdbEncodeInteger(val,buf)) > 0) {
             if (fwrite(buf,enclen,1,fp) == 0) return -1;
-            return 0;
+            return enclen;
         }
         /* otherwise... fall throught and continue with the usual
          * code path. */
@@ -3603,26 +3619,32 @@ static int rdbSaveDoubleValue(FILE *fp, double val) {
         len = buf[0]+1;
     }
     if (fwrite(buf,len,1,fp) == 0) return -1;
-    return 0;
+    return len;
 }
 
 /* Save a Redis object. */
 static int rdbSaveObject(FILE *fp, robj *o) {
+    int n, nwritten = 0;
+
     if (o->type == REDIS_STRING) {
         /* Save a string value */
-        if (rdbSaveStringObject(fp,o) == -1) return -1;
+        if ((n = rdbSaveStringObject(fp,o)) == -1) return -1;
+        nwritten = n;
     } else if (o->type == REDIS_LIST) {
         /* Save a list value */
         list *list = o->ptr;
         listIter li;
         listNode *ln;
 
-        if (rdbSaveLen(fp,listLength(list)) == -1) return -1;
+        if ((n = rdbSaveLen(fp,listLength(list))) == -1) return -1;
+        nwritten += n;
+
         listRewind(list,&li);
         while((ln = listNext(&li))) {
             robj *eleobj = listNodeValue(ln);
 
-            if (rdbSaveStringObject(fp,eleobj) == -1) return -1;
+            if ((n = rdbSaveStringObject(fp,eleobj)) == -1) return -1;
+            nwritten += n;
         }
     } else if (o->type == REDIS_SET) {
         /* Save a set value */
@@ -3630,11 +3652,14 @@ static int rdbSaveObject(FILE *fp, robj *o) {
         dictIterator *di = dictGetIterator(set);
         dictEntry *de;
 
-        if (rdbSaveLen(fp,dictSize(set)) == -1) return -1;
+        if ((n = rdbSaveLen(fp,dictSize(set))) == -1) return -1;
+        nwritten += n;
+
         while((de = dictNext(di)) != NULL) {
             robj *eleobj = dictGetEntryKey(de);
 
-            if (rdbSaveStringObject(fp,eleobj) == -1) return -1;
+            if ((n = rdbSaveStringObject(fp,eleobj)) == -1) return -1;
+            nwritten += n;
         }
         dictReleaseIterator(di);
     } else if (o->type == REDIS_ZSET) {
@@ -3643,13 +3668,17 @@ static int rdbSaveObject(FILE *fp, robj *o) {
         dictIterator *di = dictGetIterator(zs->dict);
         dictEntry *de;
 
-        if (rdbSaveLen(fp,dictSize(zs->dict)) == -1) return -1;
+        if ((n = rdbSaveLen(fp,dictSize(zs->dict))) == -1) return -1;
+        nwritten += n;
+
         while((de = dictNext(di)) != NULL) {
             robj *eleobj = dictGetEntryKey(de);
             double *score = dictGetEntryVal(de);
 
-            if (rdbSaveStringObject(fp,eleobj) == -1) return -1;
-            if (rdbSaveDoubleValue(fp,*score) == -1) return -1;
+            if ((n = rdbSaveStringObject(fp,eleobj)) == -1) return -1;
+            nwritten += n;
+            if ((n = rdbSaveDoubleValue(fp,*score)) == -1) return -1;
+            nwritten += n;
         }
         dictReleaseIterator(di);
     } else if (o->type == REDIS_HASH) {
@@ -3660,29 +3689,37 @@ static int rdbSaveObject(FILE *fp, robj *o) {
             unsigned char *key, *val;
             unsigned int klen, vlen;
 
-            if (rdbSaveLen(fp,count) == -1) return -1;
+            if ((n = rdbSaveLen(fp,count)) == -1) return -1;
+            nwritten += n;
+
             while((p = zipmapNext(p,&key,&klen,&val,&vlen)) != NULL) {
-                if (rdbSaveRawString(fp,key,klen) == -1) return -1;
-                if (rdbSaveRawString(fp,val,vlen) == -1) return -1;
+                if ((n = rdbSaveRawString(fp,key,klen)) == -1) return -1;
+                nwritten += n;
+                if ((n = rdbSaveRawString(fp,val,vlen)) == -1) return -1;
+                nwritten += n;
             }
         } else {
             dictIterator *di = dictGetIterator(o->ptr);
             dictEntry *de;
 
-            if (rdbSaveLen(fp,dictSize((dict*)o->ptr)) == -1) return -1;
+            if ((n = rdbSaveLen(fp,dictSize((dict*)o->ptr))) == -1) return -1;
+            nwritten += n;
+
             while((de = dictNext(di)) != NULL) {
                 robj *key = dictGetEntryKey(de);
                 robj *val = dictGetEntryVal(de);
 
-                if (rdbSaveStringObject(fp,key) == -1) return -1;
-                if (rdbSaveStringObject(fp,val) == -1) return -1;
+                if ((n = rdbSaveStringObject(fp,key)) == -1) return -1;
+                nwritten += n;
+                if ((n = rdbSaveStringObject(fp,val)) == -1) return -1;
+                nwritten += n;
             }
             dictReleaseIterator(di);
         }
     } else {
         redisPanic("Unknown object type");
     }
-    return 0;
+    return nwritten;
 }
 
 /* Return the length the object will have on disk if saved with
@@ -3690,10 +3727,13 @@ static int rdbSaveObject(FILE *fp, robj *o) {
  * this length with very little changes to the code. In the future
  * we could switch to a faster solution. */
 static off_t rdbSavedObjectLen(robj *o, FILE *fp) {
+    int nwritten;
     if (fp == NULL) fp = server.devnull;
     rewind(fp);
-    assert(rdbSaveObject(fp,o) != 1);
-    return ftello(fp);
+
+    /* Determining the saved length of an object should never return -1 */
+    assert((nwritten = rdbSaveObject(fp,o)) != -1);
+    return nwritten;
 }
 
 /* Return the number of pages required to save this object in the swap file */
