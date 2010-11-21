@@ -104,19 +104,19 @@ log:
 	@echo ""
 	@echo "WARNING: if it fails under Linux you probably need to install libc6-dev-i386"
 	@echo ""
-	make ARCH="-m32"
+	$(MAKE) ARCH="-m32"
 
 gprof:
-	make PROF="-pg"
+	$(MAKE) PROF="-pg"
 
 gcov:
-	make PROF="-fprofile-arcs -ftest-coverage"
+	$(MAKE) PROF="-fprofile-arcs -ftest-coverage"
 
 noopt:
-	make OPTIMIZATION=""
+	$(MAKE) OPTIMIZATION=""
 
 32bitgprof:
-	make PROF="-pg" ARCH="-arch i386"
+	$(MAKE) PROF="-pg" ARCH="-arch i386"
 
 install: all
 	$(INSTALL) $(PRGNAME) $(INSTALL_BIN)
