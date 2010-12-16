@@ -101,10 +101,6 @@ start_server {
         foreach i {199 195 1000 2000} {
             r sadd set3 $i
         }
-        for {set i 5} {$i < 200} {incr i} {
-            r sadd set4 $i
-        }
-        r sadd set5 0
 
         # To make sure the sets are encoded as the type we are testing -- also
         # when the VM is enabled and the values may be swapped in and out
@@ -115,12 +111,12 @@ start_server {
             set large foo
         }
 
-        for {set i 1} {$i <= 5} {incr i} {
+        for {set i 1} {$i <= 3} {incr i} {
             r sadd [format "set%d" $i] $large
         }
 
         test "Generated sets must be encoded as $type" {
-            for {set i 1} {$i <= 5} {incr i} {
+            for {set i 1} {$i <= 3} {incr i} {
                 assert_encoding $type [format "set%d" $i]
             }
         }
@@ -168,12 +164,20 @@ start_server {
             assert_equal $expected [lsort [r sunion nokey1 set1 set2 nokey2]]
         }
 
+        # Define extra sets that do *not* hold $large, so $large ends up in the
+        # result set for SDIFFSTORE. This in turn, makes the result set have the
+        # same encoding as the encoding we're currently testing.
+        for {set i 5} {$i < 200} {incr i} {
+            r sadd set4 $i
+        }
+        r sadd set5 0
+
         test "SDIFF with two sets - $type" {
-            assert_equal {0 1 2 3 4} [lsort [r sdiff set1 set4]]
+            assert_equal [lsort [list 0 1 2 3 4 $large]] [lsort [r sdiff set1 set4]]
         }
 
         test "SDIFF with three sets - $type" {
-            assert_equal {1 2 3 4} [lsort [r sdiff set1 set4 set5]]
+            assert_equal [lsort [list 1 2 3 4 $large]] [lsort [r sdiff set1 set4 set5]]
         }
 
         test "SDIFFSTORE with three sets - $type" {
@@ -181,7 +185,7 @@ start_server {
             # The type is determined by type of the first key to diff against.
             # See the implementation for more information.
             assert_encoding $type setres
-            assert_equal {1 2 3 4} [lsort [r smembers setres]]
+            assert_equal [lsort [list 1 2 3 4 $large]] [lsort [r smembers setres]]
         }
     }
 
