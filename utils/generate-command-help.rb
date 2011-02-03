@@ -1,86 +1,186 @@
 #!/usr/bin/env ruby
 
-GROUPS = [
-  "generic",
-  "string",
-  "list",
-  "set",
-  "sorted_set",
-  "hash",
-  "pubsub",
-  "transactions",
-  "connection",
-  "server"
-].freeze
+require "rubygems"
+require "net/http"
+require "net/https"
+require "json"
+require "uri"
 
-GROUPS_BY_NAME = Hash[*
-  GROUPS.each_with_index.map do |n,i|
-    [n,i]
-  end.flatten
-].freeze
+# See: https://github.com/antirez/redis-io/blob/master/lib/reference.rb
+class Reference
+  GROUPS = {
+    "generic" => "Keys",
+    "string" => "Strings",
+    "hash" => "Hashes",
+    "list" => "Lists",
+    "set" => "Sets",
+    "sorted_set" => "Sorted Sets",
+    "pubsub" => "Pub/Sub",
+    "transactions" => "Transactions",
+    "connection" => "Connection",
+    "server" => "Server",
+  }
 
-def argument arg
-  name = arg["name"].is_a?(Array) ? arg["name"].join(" ") : arg["name"]
-  name = arg["enum"].join "|" if "enum" == arg["type"]
-  name = arg["command"] + " " + name if arg["command"]
-  if arg["multiple"]
-    name = "#{name} [#{name} ...]"
+  class Command
+    class Argument
+      attr :argument
+
+      def initialize(argument)
+        @argument = argument
+      end
+
+      def type
+        [argument["type"]].flatten
+      end
+
+      def optional?
+        argument["optional"] || false
+      end
+
+      def multiple?
+        argument["multiple"] || false
+      end
+
+      def to_s
+        if argument["multiple"]
+          res = multiple(argument)
+        elsif argument["variadic"]
+          res = variadic(argument)
+        elsif argument["enum"]
+          res = enum(argument)
+        else
+          res = simple(argument)
+        end
+
+        argument["optional"] ? "[#{res}]" : res
+      end
+
+    private
+
+      def multiple(argument)
+        complex(argument) do |part|
+          part.unshift(argument["command"]) if argument["command"]
+        end
+      end
+
+      def variadic(argument)
+        [argument["command"], complex(argument)].join(" ")
+      end
+
+      def complex(argument)
+        2.times.map do |i|
+          part = Array(argument["name"])
+          yield(part) if block_given?
+          part = part.join(" ")
+          i == 0 ? part : "[" + part + " ...]"
+        end.join(" ")
+      end
+
+      def simple(argument)
+        [argument["command"], argument["name"]].compact.flatten.join(" ")
+      end
+
+      def enum(argument)
+        [argument["command"], argument["enum"].join("|")].compact.join(" ")
+      end
+    end
+
+    attr :name
+    attr :command
+    attr :group
+
+    def initialize(name, command)
+      @name = name
+      @command = command
+    end
+
+    def to_s
+      @to_s ||= [name, *arguments].join(" ")
+    end
+
+    def since
+      command["since"]
+    end
+
+    def group
+      command["group"]
+    end
+
+    def to_param
+      name.downcase.gsub(" ", "-")
+    end
+
+    def arguments
+      (command["arguments"] || []).map do |argument|
+        Argument.new(argument)
+      end
+    end
+
+    include Comparable
+
+    def ==(other)
+      name == other.name
+    end
+    alias eql? ==
+
+    def hash
+      name.hash
+    end
   end
-  if arg["optional"]
-    name = "[#{name}]"
+
+  include Enumerable
+
+  def initialize(commands)
+    @commands = commands
   end
-  name
+
+  def [](name)
+    Command.new(name, @commands[name]) if @commands[name]
+  end
+
+  def each
+    @commands.each do |name, attrs|
+      yield Command.new(name, attrs)
+    end
+  end
 end
 
-def arguments command
-  return "-" unless command["arguments"]
-  command["arguments"].map do |arg|
-    argument arg
-  end.join " "
+def groups
+  @groups ||= Reference::GROUPS.keys.sort
 end
 
 def commands
   return @commands if @commands
-
-  require "rubygems"
-  require "net/http"
-  require "net/https"
-  require "json"
-  require "uri"
 
   url = URI.parse "https://github.com/antirez/redis-doc/raw/master/commands.json"
   client = Net::HTTP.new url.host, url.port
   client.use_ssl = true
   response = client.get url.path
   if response.is_a?(Net::HTTPSuccess)
-    @commands = JSON.parse(response.body)
+    Reference.new JSON.parse(response.body)
   else
     response.error!
   end
 end
 
 def generate_groups
-  GROUPS.map do |n|
-    "\"#{n}\""
+  groups.map do |name|
+    "\"#{name}\""
   end.join(",\n    ");
 end
 
 def generate_commands
-  commands.to_a.sort do |x,y|
-    x[0] <=> y[0]
-  end.map do |key, command|
-    group = GROUPS_BY_NAME[command["group"]]
-    if group.nil?
-      STDERR.puts "Please update groups array in #{__FILE__}"
-      raise "Unknown group #{command["group"]}"
-    end
+  commands.sort_by do |cmd|
+    cmd.name
+  end.map do |cmd|
+    group = groups.index(cmd.group) || raise("Unknown group: #{cmd.group}")
 
     ret = <<-SPEC
-{ "#{key}",
-    "#{arguments(command)}",
-    "#{command["summary"]}",
+{ "#{cmd.name}",
+    "#{cmd.arguments.join(" ")}",
+    "#{cmd.command["summary"]}",
     #{group},
-    "#{command["since"]}" }
+    "#{cmd.command["since"]}" }
     SPEC
     ret.strip
   end.join(",\n    ")
