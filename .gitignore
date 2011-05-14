@@ -1,6 +1,9 @@
 *.o
 *.rdb
 *.log
+*.gcda
+*.gcno
+*.gcov
 redis-cli
 redis-server
 redis-benchmark

@@ -157,7 +157,7 @@ dep:
 	$(CC) -I../deps/hiredis -I../deps/linenoise -MM *.c
 
 test: redis-server
-	(cd ..; tclsh8.5 tests/test_helper.tcl --tags "${TAGS}" --file "${FILE}")
+	(cd ..; tclsh8.5 tests/test_helper.tcl --tags "${TAGS}" --file "${FILE}" --coverage "${COVERAGE}")
 
 bench:
 	./redis-benchmark

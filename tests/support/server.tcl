@@ -46,12 +46,14 @@ proc kill_server config {
     }
 
     # kill server and wait for the process to be totally exited
+    set delay 100
+    set elapsed 0
     while {[is_alive $config]} {
-        if {[incr wait 10] % 1000 == 0} {
+        if {[incr elapsed $delay] % 1000 == 0} {
             puts "Waiting for process $pid to exit..."
         }
-        catch {exec kill $pid}
-        after 10
+        catch {exec kill -TERM $pid}
+        after $delay
     }
 
     # Check valgrind errors if needed
@@ -173,6 +175,11 @@ proc start_server {options {code undefined}} {
 
     set stdout [format "%s/%s" [dict get $config "dir"] "stdout"]
     set stderr [format "%s/%s" [dict get $config "dir"] "stderr"]
+
+    # Setup gcov environment
+    set ::env(GCOV_PREFIX) [file normalize [format "%s/%s/%s" [pwd] [dict get $config "dir"] "coverage"]]
+    set ::env(GCOV_PREFIX_STRIP) [expr [llength [split [pwd] /]] - 1]
+    file mkdir $::env(GCOV_PREFIX)
 
     if {$::valgrind} {
         exec valgrind --suppressions=src/valgrind.sup src/redis-server $config_file > $stdout 2> $stderr &

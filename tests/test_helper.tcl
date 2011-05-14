@@ -19,6 +19,7 @@ set ::allowtags {}
 set ::external 0; # If "1" this means, we are running against external instance
 set ::file ""; # If set, runs only the tests in this comma separated list
 set ::curfile ""; # Hold the filename of the current suite
+set ::coverage 0; # Generate a code coverage report
 
 proc execute_tests name {
     set path "tests/$name.tcl"
@@ -102,11 +103,6 @@ proc s {args} {
     status [srv $level "client"] [lindex $args 0]
 }
 
-proc cleanup {} {
-    catch {exec rm -rf {*}[glob tests/tmp/redis.conf.*]}
-    catch {exec rm -rf {*}[glob tests/tmp/server.*]}
-}
-
 proc execute_everything {} {
     execute_tests "unit/auth"
     execute_tests "unit/protocol"
@@ -139,6 +135,11 @@ proc execute_everything {} {
     execute_tests "unit/cas"
 }
 
+proc cleanup {} {
+    catch {exec rm -rf {*}[glob tests/tmp/redis.conf.*]}
+    catch {exec rm -rf {*}[glob tests/tmp/server.*]}
+}
+
 proc main {} {
     cleanup
 
@@ -148,6 +149,42 @@ proc main {} {
         }
     } else {
         execute_everything
+    }
+
+    if {$::coverage} {
+        puts "\n\nGenerating code coverage report..."
+        flush stdout
+
+        exec rm -rf tests/tmp/lcov
+        file mkdir tests/tmp/lcov
+        set tracefiles { "tests/tmp/lcov/base.info" }
+        catch { exec lcov -c -i -d src -o [lindex $tracefiles end] }
+
+        foreach dir [glob tests/tmp/server.*/coverage] {
+            # Link gcno files
+            set files [glob -nocomplain "$dir/src/*.gcda"]
+            if {[llength $files] == 0} {
+                puts "$dir: no coverage data"
+            } else {
+                foreach gcda $files {
+                    set relfile [string range $gcda [expr [string length $dir] + 1] end]
+                    set gcno [file rootname $relfile].gcno
+                    exec ln -sf [file normalize $gcno] [file join $dir $gcno]
+                }
+
+                lappend tracefiles "$dir/lcov.info"
+                catch { exec lcov -d $dir -b src -c -o [lindex $tracefiles end] }
+            }
+        }
+
+        set args {}
+        foreach tracefile $tracefiles {
+            lappend args "-a"
+            lappend args $tracefile
+        }
+
+        exec lcov {*}$args -o tests/tmp/lcov/aggregate.info
+        exec genhtml --legend -p [pwd] -o tests/tmp/lcov/report tests/tmp/lcov/aggregate.info
     }
 
     cleanup
@@ -200,6 +237,11 @@ for {set j 0} {$j < [llength $argv]} {incr j} {
         incr j
     } elseif {$opt eq {--port}} {
         set ::port $arg
+        incr j
+    } elseif {$opt eq {--coverage}} {
+        if {$arg eq "1"} {
+            set ::coverage 1
+        }
         incr j
     } elseif {$opt eq {--verbose}} {
         set ::verbose 1
