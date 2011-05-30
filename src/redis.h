@@ -144,6 +144,10 @@
 #define REDIS_CLOSE_AFTER_REPLY 128 /* Close after writing entire reply. */
 #define REDIS_UNBLOCKED 256 /* This client was unblocked and is stored in
                                server.unblocked_clients */
+/* Monitor flags */
+#define REDIS_MONITOR_DIRTY 0x1000 /* Only feed commands with dirty status */
+#define REDIS_MONITOR_RAW 0x2000 /* Feed commands using their wire level
+                                    (multi bulk) representation */
 
 /* Client request types */
 #define REDIS_REQ_INLINE 1
@@ -642,6 +646,7 @@ void addReply(redisClient *c, robj *obj);
 void *addDeferredMultiBulkLength(redisClient *c);
 void setDeferredMultiBulkLength(redisClient *c, void *node, long length);
 void addReplySds(redisClient *c, sds s);
+void addReplyString(redisClient *c, char *s, size_t len);
 void processInputBuffer(redisClient *c);
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask);
@@ -740,7 +745,7 @@ int fwriteBulkObject(FILE *fp, robj *obj);
 
 /* Replication */
 void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc);
-void replicationFeedMonitors(list *monitors, int dictid, robj **argv, int argc);
+void replicationFeedMonitors(list *monitors, int dictid, robj **argv, int argc, int dirty);
 int syncWithMaster(void);
 void updateSlavesWaitingBgsave(int bgsaveerr);
 void replicationCron(void);

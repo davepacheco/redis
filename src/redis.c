@@ -175,7 +175,7 @@ struct redisCommand readonlyCommandTable[] = {
     {"flushall",flushallCommand,1,0,NULL,0,0,0},
     {"sort",sortCommand,-2,REDIS_CMD_DENYOOM,NULL,1,1,1},
     {"info",infoCommand,1,0,NULL,0,0,0},
-    {"monitor",monitorCommand,1,0,NULL,0,0,0},
+    {"monitor",monitorCommand,-1,0,NULL,0,0,0},
     {"ttl",ttlCommand,2,0,NULL,1,1,1},
     {"persist",persistCommand,2,0,NULL,1,1,1},
     {"slaveof",slaveofCommand,3,0,NULL,0,0,0},
@@ -964,7 +964,7 @@ void call(redisClient *c, struct redisCommand *cmd) {
         listLength(server.slaves))
         replicationFeedSlaves(server.slaves,c->db->id,c->argv,c->argc);
     if (listLength(server.monitors))
-        replicationFeedMonitors(server.monitors,c->db->id,c->argv,c->argc);
+        replicationFeedMonitors(server.monitors,c->db->id,c->argv,c->argc,dirty);
     server.stat_numcommands++;
 }
 
@@ -1360,13 +1360,30 @@ void infoCommand(redisClient *c) {
 }
 
 void monitorCommand(redisClient *c) {
-    /* ignore MONITOR if aleady slave or in monitor mode */
+    int i;
+    int ack = 1;
+
+    /* Ignore MONITOR if aleady slave or in monitor mode */
     if (c->flags & REDIS_SLAVE) return;
+
+    /* Check extra flags to MONITOR (DIRTY, RAW) */
+    for (i = 1; i < c->argc; i++) {
+        if (!strcasecmp(c->argv[i]->ptr,"dirty")) {
+            c->flags |= REDIS_MONITOR_DIRTY;
+        } else if (!strcasecmp(c->argv[i]->ptr,"raw")) {
+            c->flags |= REDIS_MONITOR_RAW;
+        } else if (!strcasecmp(c->argv[i]->ptr,"noack")) {
+            ack = 0;
+        } else {
+            addReply(c,shared.syntaxerr);
+            return;
+        }
+    }
 
     c->flags |= (REDIS_SLAVE|REDIS_MONITOR);
     c->slaveseldb = 0;
     listAddNodeTail(server.monitors,c);
-    addReply(c,shared.ok);
+    if (ack) addReply(c,shared.ok);
 }
 
 /* ============================ Maxmemory directive  ======================== */

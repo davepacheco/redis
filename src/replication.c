@@ -79,37 +79,59 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
     if (outv != static_outv) zfree(outv);
 }
 
-void replicationFeedMonitors(list *monitors, int dictid, robj **argv, int argc) {
-    listNode *ln;
-    listIter li;
+static sds monitorGenerateVerboseRepr(int dictid, robj **argv, int argc) {
     int j;
-    sds cmdrepr = sdsnew("+");
-    robj *cmdobj;
     struct timeval tv;
+    sds repr;
 
     gettimeofday(&tv,NULL);
-    cmdrepr = sdscatprintf(cmdrepr,"%ld.%06ld ",(long)tv.tv_sec,(long)tv.tv_usec);
-    if (dictid != 0) cmdrepr = sdscatprintf(cmdrepr,"(db %d) ", dictid);
-
+    repr = sdscatprintf(sdsempty(),"+%ld.%06ld ",(long)tv.tv_sec,(long)tv.tv_usec);
+    if (dictid != 0) repr = sdscatprintf(repr,"(db %d) ", dictid);
     for (j = 0; j < argc; j++) {
         if (argv[j]->encoding == REDIS_ENCODING_INT) {
-            cmdrepr = sdscatprintf(cmdrepr, "\"%ld\"", (long)argv[j]->ptr);
+            repr = sdscatprintf(repr, "\"%ld\"", (long)argv[j]->ptr);
         } else {
-            cmdrepr = sdscatrepr(cmdrepr,(char*)argv[j]->ptr,
+            repr = sdscatrepr(repr,(char*)argv[j]->ptr,
                         sdslen(argv[j]->ptr));
         }
         if (j != argc-1)
-            cmdrepr = sdscatlen(cmdrepr," ",1);
+            repr = sdscatlen(repr," ",1);
     }
-    cmdrepr = sdscatlen(cmdrepr,"\r\n",2);
-    cmdobj = createObject(REDIS_STRING,cmdrepr);
+    repr = sdscatlen(repr,"\r\n",2);
+    return repr;
+}
+
+void replicationFeedMonitors(list *monitors, int dictid, robj **argv, int argc, int dirty) {
+    listNode *ln;
+    listIter li;
+    redisClient *monitor;
+    int j;
+    sds verboserepr = NULL;
 
     listRewind(monitors,&li);
     while((ln = listNext(&li))) {
-        redisClient *monitor = ln->value;
-        addReply(monitor,cmdobj);
+        monitor = ln->value;
+
+        /* Skip when this client is only interested in commands with a dirty effect. */
+        if ((monitor->flags & REDIS_MONITOR_DIRTY) && !dirty)
+            continue;
+
+        if (monitor->flags & REDIS_MONITOR_RAW) {
+            /* Feed protocol representation of command. */
+            addReplyMultiBulkLen(monitor,argc);
+            for (j = 0; j < argc; j++)
+                addReplyBulk(monitor,argv[j]);
+        } else {
+            /* Generate verbose representation of the command. */
+            if (verboserepr == NULL)
+                verboserepr = monitorGenerateVerboseRepr(dictid,argv,argc);
+            addReplyString(monitor,verboserepr,sdslen(verboserepr));
+        }
     }
-    decrRefCount(cmdobj);
+
+    /* Clean up verbose representation if we generated one. */
+    if (verboserepr != NULL)
+        sdsfree(verboserepr);
 }
 
 void syncCommand(redisClient *c) {
