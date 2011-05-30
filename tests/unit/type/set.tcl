@@ -215,6 +215,14 @@ start_server {
             assert_equal 0 [r scard myset]
         }
 
+        test "SPOP replicates as SREM - $type" {
+            create_set myset $contents
+
+            set monitor [redis_monitor dirty]
+            set value [r spop myset]
+            assert_equal "SREM myset $value" [$monitor read]
+        }
+
         test "SRANDMEMBER - $type" {
             create_set myset $contents
             unset -nocomplain myset

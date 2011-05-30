@@ -92,6 +92,12 @@ proc redis_deferring_client {args} {
     return $client
 }
 
+proc redis_monitor {args} {
+    set client [redis_deferring_client]
+    $client monitor noack raw {*}$args
+    return $client
+}
+
 # Provide easy access to INFO properties. Same semantic as "proc r".
 proc s {args} {
     set level 0

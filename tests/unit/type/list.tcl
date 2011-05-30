@@ -134,8 +134,14 @@ start_server {
             set rd [redis_deferring_client]
             create_$type blist "a b $large c d"
 
+            set monitor [redis_monitor dirty]
+
             $rd brpoplpush blist target 1
             assert_equal d [$rd read]
+
+            # This command doesn't block because the source list is non-empty,
+            # and should be replicated as a regular RPOPLPUSH.
+            assert_equal "RPOPLPUSH blist target" [$monitor read]
 
             assert_equal d [r rpop target]
             assert_equal "a b $large c" [r lrange blist 0 -1]
@@ -146,8 +152,16 @@ start_server {
         set rd [redis_deferring_client]
         r del blist target
         $rd brpoplpush blist target 0
+
+        set monitor [redis_monitor dirty]
+
         after 1000
         r rpush blist foo
+
+        # The RPUSH will have an LPUSH effect on "target" because of the the
+        # pending BRPOPLPUSH, and should be replicated as RPOPLPUSH.
+        assert_equal "LPUSH target foo" [$monitor read]
+
         assert_equal foo [$rd read]
         assert_equal {foo} [r lrange target 0 -1]
     }
@@ -158,8 +172,19 @@ start_server {
         r del blist target
         $rd2 blpop target 0
         $rd brpoplpush blist target 0
+
+        set monitor [redis_monitor dirty]
+
         after 1000
         r rpush blist foo
+
+        # The RPUSH will LPUSH to "target" via the BRPOPLPUSH, where the BLPOP
+        # is waiting, which is why it should have no net effect. Since the
+        # MONITOR connection is made before RPUSH is called, we need to verify
+        # another mutable command can be read from the MONITOR stream next.
+        r set unrelated value
+        assert_equal "set unrelated value" [$monitor read]
+
         assert_equal foo [$rd read]
         assert_equal {target foo} [$rd2 read]
         assert_equal 0 [r exists target]
@@ -174,6 +199,7 @@ start_server {
     }
 
     test "BRPOPLPUSH with wrong destination type" {
+        # Source key exists when BRPOPLPUSH is called
         set rd [redis_deferring_client]
         r del blist target
         r set target nolist
@@ -181,12 +207,22 @@ start_server {
         $rd brpoplpush blist target 1
         assert_error "ERR*wrong kind*" {$rd read}
 
+        # Source key does not exist when BRPOPLPUSH is called
         set rd [redis_deferring_client]
         r del blist target
         r set target nolist
         $rd brpoplpush blist target 0
+
+        set monitor [redis_monitor dirty]
+
         after 1000
         r rpush blist foo
+
+        # The RPUSH cannot be handled by BRPOPLPUSH since the target key holds
+        # a string value. BRPOPLPUSH should result in an error and the RPUSH
+        # should run as if there were no clients waiting for a list push.
+        assert_equal "rpush blist foo" [$monitor read]
+
         assert_error "ERR*wrong kind*" {$rd read}
         assert_equal {foo} [r lrange blist 0 -1]
     }
