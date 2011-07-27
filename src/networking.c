@@ -37,6 +37,7 @@ redisClient *createClient(int fd) {
     c->reqtype = 0;
     c->argc = 0;
     c->argv = NULL;
+    c->cmd = NULL;
     c->multibulklen = 0;
     c->bulklen = -1;
     c->sentlen = 0;
@@ -458,6 +459,7 @@ static void freeClientArgv(redisClient *c) {
     for (j = 0; j < c->argc; j++)
         decrRefCount(c->argv[j]);
     c->argc = 0;
+    c->cmd = NULL;
 }
 
 void freeClient(redisClient *c) {
@@ -910,4 +912,3 @@ void rewriteClientCommandVector(redisClient *c, int argc, ...) {
     c->argc = argc;
     va_end(ap);
 }
-
