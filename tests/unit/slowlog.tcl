@@ -4,10 +4,10 @@ start_server {tags {"slowlog"} overrides {slowlog-log-slower-than 1000000}} {
     }
 
     test {SLOWLOG - only logs commands taking more time than specified} {
-        r config set slowlog-log-slower-than 100000
+        r config set slowlog-log-slower-than 200000
         r ping
         assert_equal 0 [r slowlog len]
-        r debug sleep 0.2
+        r debug sleep 0.25
         assert_equal 1 [r slowlog len]
     }
 
