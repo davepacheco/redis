@@ -37,9 +37,15 @@
  * either the BSD or the GPL.
  */
 
-#ifndef _WIN32
-# include "config.h"
+#ifdef EIO_CONFIG_H
+# include EIO_CONFIG_H
 #endif
+
+/*  Undone by libuv for easy build scripts.
+ * #ifndef _WIN32
+ * # include "config.h"
+ * #endif
+ */
 
 #include "eio.h"
 #include "ecb.h"
