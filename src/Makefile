@@ -150,6 +150,8 @@ dependencies:
 	@cd ../deps/hiredis && $(MAKE) static ARCH="$(ARCH)"
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)linenoise$(ENDCOLOR)
 	@cd ../deps/linenoise && $(MAKE) ARCH="$(ARCH)"
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)libeio$(ENDCOLOR)
+	@cd ../deps/libeio && $(MAKE) CFLAGS="$(OPTIMIZATION) $(ARCH) $(DEBUG)"
 
 ../deps/jemalloc/lib/libjemalloc.a:
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)jemalloc$(ENDCOLOR)
@@ -182,12 +184,12 @@ redis-check-aof: $(CHECKAOFOBJ)
 	$(QUIET_LINK)$(CC) -o $(CHECKAOFPRGNAME) $(CCOPT) $(DEBUG) $(CHECKAOFOBJ) $(CCLINK)
 
 redis-server: $(OBJ)
-	$(QUIET_LINK)$(CC) -o $(PRGNAME) $(CCOPT) $(DEBUG) $(OBJ) $(CCLINK) $(ALLOC_LINK)
+	$(QUIET_LINK)$(CC) -o $(PRGNAME) $(CCOPT) $(DEBUG) $(OBJ) $(CCLINK) $(ALLOC_LINK) ../deps/libeio/eio.o
 
 # Because the jemalloc.h header is generated as a part of the jemalloc build
 # process, building it should complete before building any other object.
 %.o: %.c $(ALLOC_DEP)
-	$(QUIET_CC)$(CC) -c $(CFLAGS) $(ALLOC_FLAGS) $(DEBUG) $(COMPILE_TIME) $<
+	$(QUIET_CC)$(CC) -c $(CFLAGS) -I../deps/libeio/ $(ALLOC_FLAGS) $(DEBUG) $(COMPILE_TIME) $<
 
 clean:
 	rm -rf $(PRGNAME) $(BENCHPRGNAME) $(CLIPRGNAME) $(CHECKDUMPPRGNAME) $(CHECKAOFPRGNAME) *.o *.gcda *.gcno *.gcov

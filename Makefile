@@ -13,6 +13,7 @@ clean:
 	cd deps/hiredis && $(MAKE) $@
 	cd deps/linenoise && $(MAKE) $@
 	-(cd deps/jemalloc && $(MAKE) distclean)
+	cd deps/libeio && $(MAKE) $@
 
 $(TARGETS):
 	cd src && $(MAKE) $@
