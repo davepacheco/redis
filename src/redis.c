@@ -727,6 +727,9 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
             processInputBuffer(c);
     }
 
+    /* Poll for finished jobs */
+    eio_poll();
+
     /* Write the AOF buffer on disk */
     flushAppendOnlyFile();
 }
@@ -964,6 +967,10 @@ void initServer() {
     if (server.vm_enabled) vmInit();
     slowlogInit();
     srand(time(NULL)^getpid());
+
+    /* Initialization of libeio should happen after the server was daemonized. */
+    eio_init(NULL, NULL);
+    eio_set_max_parallel(1);
 }
 
 /* Populates the Redis Command Table starting from the hard coded list

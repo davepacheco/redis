@@ -18,6 +18,7 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <syslog.h>
+#include <eio.h>
 
 #include "ae.h"     /* Event driven programming library */
 #include "sds.h"    /* Dynamic safe strings */
